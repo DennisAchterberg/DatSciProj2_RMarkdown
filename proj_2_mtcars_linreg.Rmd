@@ -1,0 +1,154 @@
+---
+title: "mtcars_linreg"
+author: "Dennis Achterberg"
+date: "2025-07-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Predicting fuel usage of a car using Linear Regression on mtcars dataset
+
+We'll explore R Markdown and stepwise linear regression in this notebook, using the   mtcars dataset that's already available in base R.
+
+```{r cars}
+#load the data
+data(mtcars)
+
+#get a first idea of the data
+head(mtcars)
+
+```
+
+The mtcars dataset has been loaded, and head() provides a glimpse into its structure.
+
+```{r}
+#get the summary
+summary(mtcars)
+```
+
+Now we know what variables are contained in the Dataset and how they are\
+distributed. Some information on the variables:
+
+| Column | Description                              |
+|:-------|:-----------------------------------------|
+| mpg    | Miles/(US) gallon                        |
+| cyl    | Number of cylinders                      |
+| disp   | Displacement (cu.in.)                    |
+| hp     | Gross horsepower                         |
+| drat   | Rear axle ratio                          |
+| wt     | Weight (1000 lbs)                        |
+| qsec   | 1/4 mile time                            |
+| vs     | Engine (0 = V-shaped, 1 = straight)      |
+| am     | Transmission (0 = automatic, 1 = manual) |
+| gear   | Number of forward gears                  |
+| carb   | Number of carburetors                    |
+
+Source: [www.rdocumentation.org](https://www.rdocumentation.org/packages/datasets/versions/3.6.2/topics/mtcars)
+
+Now we know what's in the data. The target variable is mpg, which tells us how many\
+gallons the cars required per mile driven. As this is supposed to be predicted via\
+linear regression, we need to check if the variables correlate linearly.
+
+```{r pairplot, echo = FALSE, fig.width=10, fig.height=8, out.width="80%", out.height="80%", dpi=300, message=FALSE}
+# Load the GGally package
+library(GGally)
+
+# Create the pairplot
+ggpairs(mtcars)
+```
+The ggpairs plot allows for a visual inspection of pairwise relationships between variables. While not all pairs exhibit perfect linearity, the relationships between mpg and several predictor variables (e.g., wt, cyl, hp) appear sufficiently linear to proceed with a linear regression analysis.\
+
+We are going to implement a stepwise model search, choosing to add variables based on AIC\
+until we have found the optimal model. Starting with the "zero model" and adding variables\
+we are essentially doing forward search, with the added option of also removing a variable\
+therefore it is bi-directional.
+
+```{r stepwise regression}
+# Define the null model (starting point with only an intercept)
+# This model says mpg is explained by nothing but a constant.
+lmod0 <- lm(mpg ~ 1, data = mtcars)
+stepmodb <- step(lmod0,
+                 direction = "both",
+                 scope=.~.+cyl + disp + hp + drat + wt + qsec + vs + am + gear + carb)
+
+```
+
+The stepwise search in both directions gave us the model mpg \~ wt + cyl + hp with AIC 62.66.\
+To mitigate the risk of converging to a local optimum, a backward stepwise selection will also be performed. This approach begins with a full model (including all potential predictors) and iteratively removes variables based on AIC until the optimal model is identified.\
+We are going to start with all variables and then remove them based on AIC until we arrive\
+at the optimal model.
+
+```{r backwards search}
+#starting point here is a linear model that contains all variables
+lmodall <- lm(mpg ~ cyl + disp + hp + drat + wt + qsec + vs + am + gear + carb, data =mtcars)
+
+
+stepmod_backw <- step(lmodall, direction = "backward")
+
+```
+
+The backwards search gave us the model mpg \~ wt + qsec + am with an AIC of 61.31 This is better than the previous model, as we want to reduce AIC.  
+Semantically we are using the weight,\
+acceleration and transmission type to predict the gas usage, which makes sense.
+
+### Residual analysis
+
+As linear regression is based upon several assumptions, we are going to check if\
+our data falls in line with these. An important aspect of that are the residuals.
+
+Residuals are the "prediction errors" between the actual value y and the predicted\
+value \^y, subtracting the \^y from y gives us the residual.
+
+In regard to the CRISP-DM Framework this step can be considered "evaluation"
+
+##### Residual Plot:
+Plotting standardized residuals against predicted values helps assess the assumptions of linearity and homoscedasticity. Ideally, we want to see a random scatter of points around the horizontal line at zero, with no discernible patterns or fanning (indicating constant variance). 
+
+```{r residual plot}
+predicted <- fitted (stepmod_backw)
+st_res <- rstandard(stepmod_backw)
+
+#the plot itself:
+plot (predicted, st_res,pch=16,
+      xlab = "Predicted mpg",
+      ylab = "Standartised residuals")
+abline(h=0)
+
+```
+While some minor deviations are present, the residuals appear to be relatively evenly scattered around zero, suggesting that the linearity assumption is largely met and there are no severe signs of heteroscedasticity.
+
+##### QQ-Plot
+
+A Quantile-Quantile (Q-Q) plot is used to assess the normality of the standardized residuals. It plots the quantiles of the observed residuals against the theoretical quantiles of a standard normal distribution (a straight line)
+
+```{r qqplot}
+qqnorm(st_res,
+       xlab="NV-Quantile",
+       ylab="Quantile der stand. Residuen",
+       main="Q-Q-Plot standardisierte Residuen")
+
+# Referenzgerade für Normalverteilung
+qqline(st_res, col="blue", lwd=2)
+```
+
+The points generally follow the blue reference line, indicating that the residuals are approximately normally distributed. There might be slight deviations at the tails, which is common with smaller datasets, but overall, it suggests the normality assumption is reasonably satisfied.
+
+#####Shapiro Wilk Test
+Lastly, the Shapiro-Wilk test provides a formal statistical test for normality of the residuals.
+
+```{r shapiro wilk}
+shapiro.test(st_res)
+
+```
+Shapiro wilk assumes the H_0 of residuals being normally distributed, with H_1 being the opposite. Therefore contrary to most other tests, we generally want to keep H_0 so high o values are good. 
+
+At a significance level (alpha) of 0.05, the p-value from the Shapiro-Wilk test is 0.08674. Since this p-value is greater than 0.05, we fail to reject the null hypothesis. This indicates that there is no significant evidence to suggest that the residuals deviate from a normal distribution, thus supporting the normality assumption for our linear regression model.
+
+Or worded the other way around, p is larger than alpha so the residuals are normally distributed. 
+
+
+
+
